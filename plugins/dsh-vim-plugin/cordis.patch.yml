@@ -1,0 +1,7 @@
+# dsh-vim-plugin bundle layer: insert the vim-mode client plugin into a web
+# composition. The host half is the package's empty `apply` node entry; the
+# browser half ships via the package's `dsh.client` declaration and is served
+# by dsh-client-modules once the row is enabled.
+- insert:
+    - id: ui-vim-mode
+      name: dsh-vim-plugin

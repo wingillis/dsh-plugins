@@ -1,0 +1,15 @@
+{
+  "name": "dsh-plugins",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Personal out-of-tree plugins for dsh (https://github.com/deepseek-ai/deepseek-harness)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wingillis/dsh-plugins.git"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test"
+  }
+}

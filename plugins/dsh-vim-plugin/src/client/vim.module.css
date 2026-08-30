@@ -1,0 +1,87 @@
+/* Vim mode chrome: the composer-card mode badge, the NORMAL-mode block
+   caret, and the tool-row toggle. */
+
+/* The overlay entry's own anchor: spans the composer card's overlay box and
+   never takes pointer events, so positioned children (badge, block caret)
+   address the card without intercepting its interaction. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The NORMAL badge: a quiet chip pinned inside the composer card's bottom
+   right corner (the classic mode line position; the overlay anchor spans the
+   card, so both insets pin it to the card's padding box). */
+.badge {
+  position: absolute;
+  right: 10px;
+  bottom: 52px;
+  z-index: 90;
+  padding: 1px 8px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+/* The tool-row toggle: compact text chip matching the composer chrome. */
+.toggle {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.toggle.active {
+  background: var(--dsw-alias-button-ghost-active-fill);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The NORMAL-mode block caret: a translucent box over the character under
+   the caret, blinking on the terminal cadence. It paints above the text
+   (the overlay anchor is positioned, the draft surface is not), and the
+   translucency keeps the covered glyph readable. */
+.block {
+  position: absolute;
+  z-index: 90;
+  border-radius: 1px;
+  background: var(--dsw-alias-brand-primary);
+  opacity: 0.35;
+  animation: dsh-vim-blink 1.1s steps(1, end) infinite;
+}
+
+@keyframes dsh-vim-blink {
+  0%, 55% { opacity: 0.35; }
+  56%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block {
+    animation: none;
+  }
+}
+
+/* Applied to the composer's contenteditable while a modal mode is active:
+   the native thin caret hides so the block caret (or the visual selection)
+   is the only cursor. */
+.blockCaret {
+  caret-color: transparent;
+}
