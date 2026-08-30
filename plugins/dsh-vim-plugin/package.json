@@ -46,7 +46,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsdown",
-    "prepare": "pnpm run build",
+    "prepare": "node -e \"process.exit(require('fs').existsSync('lib/client.js') ? 0 : 1)\" || pnpm run build",
     "test": "vitest run",
     "watch": "tsdown --watch"
   },
