@@ -23,14 +23,7 @@ Requires `dsh` `0.1.2-alpha.2` or newer. Install into a profile (the shipped `we
 dsh plugin --profile web add github:wingillis/dsh-plugins#path:plugins/dsh-vim-plugin
 ```
 
-The first git install asks you to allow the package's `prepare` build script — copy the key pnpm prints into the profile's `pnpm-workspace.yaml`:
-
-```yaml
-allowBuilds:
-  dsh-vim-plugin: true
-```
-
-then re-run the `add`. Alternatively install a prebuilt tarball (no build permission needed):
+The first git install asks you to allow the package's `prepare` script — copy the exact key pnpm prints into the profile's `pnpm-workspace.yaml` (it is the full `dsh-vim-plugin@https://codeload...` form, not the bare name), then re-run the `add`. The build is a no-op when `lib/` is committed, so the allowance only replays that check. Alternatively install a prebuilt tarball (no build permission needed):
 
 ```sh
 pnpm pack && dsh plugin --profile web add ./dsh-vim-plugin-0.1.0.tgz
