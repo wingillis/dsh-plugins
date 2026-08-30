@@ -2,6 +2,8 @@
 
 Personal out-of-tree plugins for [dsh](https://github.com/deepseek-ai/deepseek-harness) (DeepSeek Harness), installable through the community plugin flow (`dsh plugin add`).
 
+> **Note:** these plugins require [my fork of DeepSeek Harness](https://github.com/wingillis/deepseek-harness) — they build and run against APIs in the fork, not the upstream `deepseek-ai/deepseek-harness` release.
+
 ## Plugins
 
 | Plugin | Description |
