@@ -20,6 +20,9 @@ const BARE_WIDTH_RATIO = 0.6
 /** Pixel fallback when the font size itself is unreadable. */
 const BARE_WIDTH_FLOOR = 8
 
+/** Line height used when the surface reports `normal` and only the font size is measurable. */
+const EMPTY_LINE_RATIO = 1.2
+
 /**
  * The composer's editing surface of the card containing `root`.
  * @param root - any element rendered inside the composer card.
@@ -80,8 +83,50 @@ function charBox(editable: Element, range: Range): CaretBlock | null {
     }
   }
   const box = range.getBoundingClientRect()
-  if (box.height <= 0 && box.width <= 0) return null
-  return boxOf(box, width)
+  if (box.height > 0 || box.width > 0) return boxOf(box, width)
+  // Empty draft (or an unrendered caret node): no character geometry of its
+  // own, so the block rides the surface's first line cell instead.
+  return emptyBox(editable, width)
+}
+
+/**
+ * The empty-draft fallback cell: the block caret anchored at the surface's
+ * first line when the collapsed selection has no character geometry of its
+ * own (an empty draft, or a caret on an unrendered node). Prefers the
+ * contents range's first client rect (the line box at the insertion point);
+ * falls back to the editable's own box inset by its padding, with the
+ * line-height (or font-size-derived) height.
+ * @param editable - the composer's editing surface.
+ * @param width - the bare caret width.
+ * @returns the fallback box, or null when even the surface is unmeasurable.
+ */
+function emptyBox(editable: Element, width: number): CaretBlock | null {
+  const contents = editable.ownerDocument.createRange()
+  contents.selectNodeContents(editable)
+  // jsdom-style DOMs ship no Range client-rect API; the editable box below
+  // is the fallback there too.
+  const first = typeof contents.getClientRects === 'function' ? contents.getClientRects()[0] : undefined
+  if (first !== undefined && first.height > 0) {
+    return { left: first.left, top: first.top, width, height: first.height }
+  }
+  const box = editable.getBoundingClientRect()
+  if (box.height <= 0) return null
+  const style = getComputedStyle(editable)
+  const pad = (value: string): number => {
+    const parsed = parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  const lineHeight = parseFloat(style.lineHeight)
+  const size = parseFloat(style.fontSize)
+  const height = Number.isFinite(lineHeight)
+    ? lineHeight
+    : Number.isFinite(size) ? size * EMPTY_LINE_RATIO : box.height
+  return {
+    left: box.left + pad(style.paddingLeft),
+    top: box.top + pad(style.paddingTop),
+    width,
+    height,
+  }
 }
 
 /**

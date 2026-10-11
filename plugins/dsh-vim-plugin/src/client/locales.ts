@@ -11,6 +11,10 @@ export const zh = {
   'mode.normal': 'NORMAL',
   'mode.insert': 'INSERT',
   'mode.visual': 'VISUAL',
+  'command.description': '切换 Vim 编辑（当前：{state}）',
+  'command.state.enabled': '已启用',
+  'command.state.disabled': '已停用',
+  'command.attachmentsUnsupported': '附件不能伴随 /vim 命令提交',
 } satisfies Record<string, string>
 
 /** The vim.mode namespace key union. */
@@ -24,4 +28,8 @@ export const en = {
   'mode.normal': 'NORMAL',
   'mode.insert': 'INSERT',
   'mode.visual': 'VISUAL',
+  'command.description': 'Toggle Vim editing (currently: {state})',
+  'command.state.enabled': 'enabled',
+  'command.state.disabled': 'disabled',
+  'command.attachmentsUnsupported': 'Attachments cannot accompany the /vim command',
 } satisfies Record<VimModeKey, string>

@@ -24,6 +24,12 @@ export interface VimDoc {
   readonly caret: number
   /** Live range selection, when the user dragged one. */
   readonly selection: { readonly start: number; readonly end: number } | null
+  /**
+   * Display-row start offsets for soft-wrapped rendering (0, then every wrap
+   * point and every logical line start), measured by the controller when a
+   * `g`-prefixed motion needs it; null/absent degrades `gj`/`gk` to `j`/`k`.
+   */
+  readonly vlines?: readonly number[] | null
 }
 
 /** Normalized key event description. */
@@ -289,6 +295,47 @@ function findInLine(
     }
   }
   return null
+}
+
+/** Index of one offset's display row within a visual-line map (row starts sorted, [0] === 0). */
+function visualRowOf(vlines: readonly number[], at: number): number {
+  let lo = 0
+  let hi = vlines.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if ((vlines[mid] ?? 0) <= at) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
+
+/**
+ * The `gj`/`gk` motion: move by display rows over the controller-measured
+ * visual-line map, riding the caret's screen column (its distance from the
+ * current row's start — never the logical wantColumn, which counts from the
+ * logical line start and would land wrong on wrapped rows). The caret clamps
+ * to the logical line's end, never past it. Vim treats these as exclusive
+ * charwise motions for operators — unlike the linewise `j`/`k`. Without a
+ * map the motion degrades to logical `j`/`k` (identical on unwrapped
+ * content).
+ * @param dir signed row count (already count-multiplied; negative = up).
+ */
+function visualRowMotion(doc: VimDoc, caret: number, dir: number): MotionTarget | null {
+  const vlines = doc.vlines ?? null
+  if (vlines === null || vlines.length === 0 || (vlines[0] ?? -1) !== 0) {
+    return resolveMotion(doc.text, caret, dir > 0 ? 'j' : 'k', Math.abs(dir), null)
+  }
+  const text = doc.text
+  const row = visualRowOf(vlines, caret)
+  const target = Math.max(0, Math.min(row + dir, vlines.length - 1))
+  const starts = lineStarts(text)
+  const column = caret - (vlines[row] ?? 0)
+  const rowStart = vlines[target] ?? 0
+  const targetLine = lineSpan(text, starts, lineOf(starts, Math.min(rowStart, text.length)))
+  const land = clampToLine(rowStart + column, targetLine)
+  // 'clear' keeps the screen column out of wantColumn: that register is the
+  // logical j/k column; mixing the two coordinate systems mis-lands motions.
+  return { from: caret, to: land, land, vertical: false, want: 'clear' }
 }
 
 /** Invert a find kind (`,` repeats the last find in the opposite direction). */
@@ -557,6 +604,13 @@ function stepNormal(state: VimMachineState, doc: VimDoc, ev: VimKey): VimStep {
       }
       return finishPlainMotion(state, sim, caret, motion, col, state.wantColumn)
     }
+    if (ev.key === 'j' || ev.key === 'k') {
+      const motion = visualRowMotion(doc, caret, ev.key === 'j' ? count : -count)
+      if (state.pendingOperator !== null) {
+        return applyOperatorMotion(state, sim, caret, state.pendingOperator, motion)
+      }
+      return finishPlainMotion(state, sim, caret, motion, col, state.wantColumn)
+    }
     // Any other key cancels the gg wait and re-runs as an ordinary key.
     return stepNormal(clearPending(state), doc, ev)
   }
@@ -775,6 +829,12 @@ function stepVisual(state: VimMachineState, vis: VisualState, doc: VimDoc, ev: V
   if (state.pendingG) {
     if (ev.key === 'g') {
       return finishVisualMotion(state, vis, sim, caret, resolveMotion(doc.text, caret, 'gg', count, null), col)
+    }
+    if (ev.key === 'j' || ev.key === 'k') {
+      return finishVisualMotion(
+        state, vis, sim, caret,
+        visualRowMotion(doc, caret, ev.key === 'j' ? count : -count), col,
+      )
     }
     // Any other key cancels the gg wait (the selection survives) and re-runs
     // as an ordinary key.

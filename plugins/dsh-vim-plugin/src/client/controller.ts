@@ -8,6 +8,7 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ComposerEditFace } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { INITIAL_VIM_STATE, step, type VimMachineState } from './vim/machine.ts'
+import { measureVisualLines } from './vim/visualLines.ts'
 
 /** localStorage key of the enabled preference (see client-store persistence). */
 const PERSIST_KEY = 'dsh.vim-mode.enabled'
@@ -65,7 +66,10 @@ export class VimController {
     const text = face.text()
     const selection = face.selection()
     const caret = selection === null ? face.caret() ?? text.length : selection.end
-    const result = step(this.machine, { text, caret, selection }, {
+    // gj/gk need the display-row map; measure lazily, only while the machine
+    // waits on a `g` prefix (one mirror per g-prefixed key, never per key).
+    const vlines = this.machine.pendingG ? measureVisualLines(text) : null
+    const result = step(this.machine, { text, caret, selection, vlines }, {
       key: event.key,
       ctrl: event.ctrlKey,
       meta: event.metaKey,

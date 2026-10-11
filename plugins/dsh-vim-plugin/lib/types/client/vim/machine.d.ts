@@ -37,6 +37,12 @@ export interface VimDoc {
         readonly start: number;
         readonly end: number;
     } | null;
+    /**
+     * Display-row start offsets for soft-wrapped rendering (0, then every wrap
+     * point and every logical line start), measured by the controller when a
+     * `g`-prefixed motion needs it; null/absent degrades `gj`/`gk` to `j`/`k`.
+     */
+    readonly vlines?: readonly number[] | null;
 }
 /** Normalized key event description. */
 export interface VimKey {

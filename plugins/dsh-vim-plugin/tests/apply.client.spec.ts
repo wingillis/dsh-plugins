@@ -10,6 +10,7 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply, inject } from 'dsh-vim-plugin/client'
 import type { ComposerEditFace } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { VimBadgeInjected, VimToggleInjected } from 'dsh-vim-plugin/client'
 
 /** Recorded composerKeys registry stand-in. */
@@ -56,6 +57,28 @@ function keyEvent(key: string): KeyboardEvent {
   return { key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false } as KeyboardEvent
 }
 
+/** Recorded inputTriggers stand-in: collects the sources plugins register. */
+function fakeInputTriggers() {
+  const sources: InputTriggerSource[] = []
+  return {
+    sources,
+    registerSource(source: InputTriggerSource): () => void {
+      sources.push(source)
+      return () => {
+        const at = sources.indexOf(source)
+        if (at >= 0) sources.splice(at, 1)
+      }
+    },
+  }
+}
+
+/** Sessions stand-in: hands back one session scope whose bail calls record. */
+function fakeSessions() {
+  const bails: Array<{ channel: string, args: unknown }> = []
+  const scopeCtx = { bail: (_self: unknown, channel: string, args: unknown) => { bails.push({ channel, args }) } }
+  return { bails, scope: () => scopeCtx }
+}
+
 async function bench() {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
@@ -75,12 +98,16 @@ async function bench() {
   ctx.provide('locale', locale)
   const registry = fakeRegistry()
   ctx.provide('composerKeys', registry)
-  return { ctx, slots, locale, registry }
+  const inputTriggers = fakeInputTriggers()
+  ctx.provide('inputTriggers', inputTriggers)
+  const sessions = fakeSessions()
+  ctx.provide('sessions', sessions)
+  return { ctx, slots, locale, registry, inputTriggers, sessions }
 }
 
 describe('apply', () => {
-  it('declares the slot, locale, and composerKeys dependencies', () => {
-    expect(inject).toEqual(['slots', 'locale', 'composerKeys'])
+  it('declares the slot, locale, composerKeys, inputTriggers, and sessions dependencies', () => {
+    expect(inject).toEqual(['slots', 'locale', 'composerKeys', 'inputTriggers', 'sessions'])
   })
 
   it('registers the bilingual dictionaries and both chrome entries', async () => {
@@ -120,17 +147,69 @@ describe('apply', () => {
     expect(interceptor.keydown(face('abc', 1), keyEvent('Escape'))).toBe(true)
   })
 
+  it('registers the /vim source: a menu row that toggles, a bare enter that toggles and consumes', async () => {
+    const { ctx, inputTriggers, sessions, registry } = await bench()
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    expect(inputTriggers.sources).toHaveLength(1)
+    const source = inputTriggers.sources[0]!
+    expect(source.trigger).toBe('/')
+    expect(source.name).toBe('vim')
+    expect(source.showGroupTitle).toBe(false)
+
+    const interceptor = registry.interceptors[0]!
+    const session = { sessionId: 's1' } as never
+
+    // The menu row names the switch it flips, with the live state baked in.
+    const rows = await source.candidates(session, {
+      query: '', position: 'leading', drilled: false, signal: new AbortController().signal,
+    })
+    expect(rows).toEqual([{ name: 'vim', description: '切换 Vim 编辑（当前：已停用）' }])
+
+    // A menu pick toggles and clears the token (the empty text substitutes
+    // the picked span).
+    expect(source.onPick({
+      candidate: rows[0]!, session, position: 'leading', via: 'menu', action: 'pick',
+      span: { start: 0, end: 4 } as never,
+    })).toEqual({ text: '' })
+    expect(interceptor.keydown(face('abc', 1), keyEvent('Escape'))).toBe(true)
+
+    // A bare enter toggles back, consumes the token on the session scope,
+    // and reports handled (the line never sinks as a message).
+    const outcome = await source.matchEnter!(session, '/vim', new AbortController().signal, { attachments: 0 })
+    expect(outcome).toBe('handled')
+    expect(interceptor.keydown(face('abc', 1), keyEvent('Escape'))).toBe(false)
+    expect(sessions.bails).toEqual([{
+      channel: 'slash/input-consume-token',
+      args: { guard: { kind: 'bare-token', token: '/vim' } },
+    }])
+
+    // Non-bare lines and other commands pass through untouched.
+    expect(await source.matchEnter!(session, '/vim extra', new AbortController().signal, { attachments: 0 })).toBeUndefined()
+    expect(await source.matchEnter!(session, '/other', new AbortController().signal, { attachments: 0 })).toBeUndefined()
+
+    // The candidates row reflects the live switch after the toggles.
+    expect((await source.candidates(session, {
+      query: '', position: 'leading', drilled: false, signal: new AbortController().signal,
+    }))[0]!.description).toBe('切换 Vim 编辑（当前：已停用）')
+
+    // An attachment-carrying submission is refused (the draft and attachments stay).
+    await expect(source.matchEnter!(session, '/vim', new AbortController().signal, { attachments: 1 }))
+      .rejects.toThrow('附件不能伴随 /vim 命令提交')
+  })
+
   it('fiber teardown removes the chrome entries and the interceptor (HMR safety)', async () => {
-    const { ctx, slots, registry } = await bench()
+    const { ctx, slots, registry, inputTriggers } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     expect(slots.entries('conversation.input.left')).toHaveLength(1)
     expect(slots.entries('conversation.input.overlay')).toHaveLength(1)
     expect(registry.interceptors).toHaveLength(1)
+    expect(inputTriggers.sources).toHaveLength(1)
 
     await fiber.dispose()
     expect(slots.entries('conversation.input.left')).toHaveLength(0)
     expect(slots.entries('conversation.input.overlay')).toHaveLength(0)
     expect(registry.interceptors).toHaveLength(0)
+    expect(inputTriggers.sources).toHaveLength(0)
   })
 })

@@ -549,3 +549,84 @@ describe('visual mode edge arms', () => {
     expect(bare.editor.ops).toEqual([{ type: 'select', start: 1, end: 2 }])
   })
 })
+
+describe('visual-row motions (gj/gk)', () => {
+  /** drive, but every step carries a display-row map (the controller's measurement stand-in). */
+  function driveV(text: string, caret: number, vlines: readonly number[] | null, keys: readonly (VimKey | string)[]): {
+    editor: Editor
+    machine: VimMachineState
+  } {
+    let machine = INITIAL_VIM_STATE
+    machine = { ...machine, mode: 'normal' }
+    const editor = new Editor(text, caret)
+    for (const k of keys) {
+      const result = step(machine, {
+        text: editor.text, caret: editor.caret, selection: null, vlines,
+      }, typeof k === 'string' ? key(k) : k)
+      editor.apply(result.ops)
+      machine = result.state
+    }
+    return { editor, machine }
+  }
+
+  // One logical line of 30 chars soft-wrapped into rows starting at 0, 10, 20.
+  const line = 'abcdefghijklmnopqrstuvwxyz0123'
+  const vlines = [0, 10, 20]
+
+  it('gj/gk move by display rows preserving the screen column', () => {
+    const down = driveV(line, 3, vlines, ['g', 'j'])
+    expect(down.editor.caret).toBe(13)
+    const up = driveV(line, 23, vlines, ['g', 'k'])
+    expect(up.editor.caret).toBe(13)
+  })
+
+  it('counts multiply rows and clamping stops at the last row', () => {
+    const far = driveV(line, 3, vlines, ['5', 'g', 'j'])
+    expect(far.editor.caret).toBe(23)
+    const top = driveV(line, 3, vlines, ['5', 'g', 'k'])
+    expect(top.editor.caret).toBe(3)
+  })
+
+  it('the column clamps to the logical line end on shorter target rows', () => {
+    // A wrapped doc: row 2 (offset 20) runs only to the line end at 26.
+    const wrapped = 'abcdefghijklmnopqrstuvwxyz'
+    const map = [0, 10, 20]
+    const deep = driveV(wrapped, 8, map, ['g', 'j', 'g', 'j', 'g', 'j'])
+    // Column 8 rides rows 0→1→2 (28 would overshoot), then clamps to 26 (end cell).
+    expect(deep.editor.caret).toBe(26)
+  })
+
+  it('without a row map gj/gk degrade to logical j/k', () => {
+    const twoLines = 'abc\ndef'
+    const down = driveV(twoLines, 1, null, ['g', 'j'])
+    expect(down.editor.caret).toBe(5)
+    const same = driveV('abc', 1, [], ['g', 'j'])
+    expect(same.editor.caret).toBe(1)
+  })
+
+  it('d gj deletes charwise-exclusive across the wrap (unlike linewise dj)', () => {
+    const del = driveV(line, 8, vlines, ['d', 'g', 'j'])
+    // Caret 8 rides column 8 onto row 1 (offset 10): the exclusive span is [8, 18).
+    expect(del.editor.text).toBe('abcdefgh' + line.slice(18))
+    expect(del.machine.register).toEqual({ text: line.slice(8, 18), linewise: false })
+  })
+
+  it('vgj extends the selection by display rows', () => {
+    const sel = driveV(line, 3, vlines, ['v', 'g', 'j'])
+    expect(sel.machine.visual?.caret).toBe(13)
+    expect(sel.editor.ops.at(-1)).toEqual({ type: 'select', start: 3, end: 14 })
+  })
+
+  it('gk uses the screen column, not a logical wantColumn left by j/k', () => {
+    // Line 2 wraps at 21; the logical j/k column (15) differs from the caret's
+    // screen column on row 2 (5) — gj/gk must ride the screen column.
+    const wrapped = 'aaaaaaaaaa\nbbbbbbbbbbcccccccccc'
+    const map = [0, 11, 21]
+    // k + j park the caret at 26 with wantColumn 15 (logical).
+    const ride = driveV(wrapped, 26, map, ['k', 'j'])
+    expect(ride.editor.caret).toBe(26)
+    expect(ride.machine.wantColumn).toBe(15)
+    const up = driveV(wrapped, 26, map, ['k', 'j', 'g', 'k'])
+    expect(up.editor.caret).toBe(16)
+  })
+})

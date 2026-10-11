@@ -35,7 +35,7 @@ for (const manifestPath of globSync('packages/*/*/package.json', { cwd: harness 
 
 /**
  * Resolve one @deepseek-ai specifier against the harness sources: the package
- * entry, a `/client` or `/invariant` subpath, an explicit `/src/*` path, or a
+ * entry, a `/client` subpath, an explicit `/src/*` path, or a
  * file-or-directory subpath (`/types`, `/display`, ...).
  */
 function harnessSource(specifier: string): string | undefined {

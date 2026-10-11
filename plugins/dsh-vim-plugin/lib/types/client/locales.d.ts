@@ -10,6 +10,10 @@ export declare const zh: {
     'mode.normal': string;
     'mode.insert': string;
     'mode.visual': string;
+    'command.description': string;
+    'command.state.enabled': string;
+    'command.state.disabled': string;
+    'command.attachmentsUnsupported': string;
 };
 /** The vim.mode namespace key union. */
 export type VimModeKey = keyof typeof zh;
@@ -21,4 +25,8 @@ export declare const en: {
     'mode.normal': string;
     'mode.insert': string;
     'mode.visual': string;
+    'command.description': string;
+    'command.state.enabled': string;
+    'command.state.disabled': string;
+    'command.attachmentsUnsupported': string;
 };

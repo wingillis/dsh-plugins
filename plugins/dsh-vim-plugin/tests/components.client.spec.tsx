@@ -244,6 +244,26 @@ describe('computeCaretBlock geometry', () => {
     expect(computeCaretBlock(anchor)).toBeNull()
   })
 
+  it('anchors the block on the first line cell of an empty draft', () => {
+    // The empty composer: no text node at all, and a collapsed selection
+    // whose own box measures nothing — the block must still appear.
+    const card = document.createElement('div')
+    card.setAttribute('data-composer-card', '')
+    const editable = document.createElement('div')
+    editable.setAttribute('contenteditable', 'true')
+    editable.style.fontSize = '10px'
+    card.appendChild(editable)
+    document.body.appendChild(card)
+    const anchor = document.createElement('div')
+    card.appendChild(anchor)
+    const spy = vi.spyOn(editable, 'getBoundingClientRect').mockReturnValue(rect(10, 20, 200, 16))
+    mockRangeRect(rect(0, 0, 0, 0))
+    collapseAt(editable, 0)
+    // Bare width 10px × 0.6; height from the font-size line fallback (12px).
+    expect(computeCaretBlock(anchor)).toEqual({ left: 10, top: 20, width: 6, height: 12 })
+    spy.mockRestore()
+  })
+
   it('derives the bare width from the surface font size', () => {
     const { card, editable } = cardFixture()
     const anchor = document.createElement('div')

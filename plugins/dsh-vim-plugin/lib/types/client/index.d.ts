@@ -11,7 +11,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         'vim.mode': VimModeKey;
     }
 }
-/** Required services: the slot tree, the locale seat, and the composer keyboard registry. */
+/** Required services: the slot tree, the locale seat, the composer keyboard registry, and the slash-trigger pipeline. */
 export declare const inject: string[];
 /**
  * Client plugin body: mount the controller, register the keydown

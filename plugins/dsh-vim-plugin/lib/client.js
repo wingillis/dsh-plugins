@@ -195,6 +195,47 @@ window.__ModuleLoader__.load({
 			}
 			return null;
 		}
+		/** Index of one offset's display row within a visual-line map (row starts sorted, [0] === 0). */
+		function visualRowOf(vlines, at) {
+			let lo = 0;
+			let hi = vlines.length - 1;
+			while (lo < hi) {
+				const mid = lo + hi + 1 >> 1;
+				if ((vlines[mid] ?? 0) <= at) lo = mid;
+				else hi = mid - 1;
+			}
+			return lo;
+		}
+		/**
+		* The `gj`/`gk` motion: move by display rows over the controller-measured
+		* visual-line map, riding the caret's screen column (its distance from the
+		* current row's start — never the logical wantColumn, which counts from the
+		* logical line start and would land wrong on wrapped rows). The caret clamps
+		* to the logical line's end, never past it. Vim treats these as exclusive
+		* charwise motions for operators — unlike the linewise `j`/`k`. Without a
+		* map the motion degrades to logical `j`/`k` (identical on unwrapped
+		* content).
+		* @param dir signed row count (already count-multiplied; negative = up).
+		*/
+		function visualRowMotion(doc, caret, dir) {
+			const vlines = doc.vlines ?? null;
+			if (vlines === null || vlines.length === 0 || (vlines[0] ?? -1) !== 0) return resolveMotion(doc.text, caret, dir > 0 ? "j" : "k", Math.abs(dir), null);
+			const text = doc.text;
+			const row = visualRowOf(vlines, caret);
+			const target = Math.max(0, Math.min(row + dir, vlines.length - 1));
+			const starts = lineStarts(text);
+			const column = caret - (vlines[row] ?? 0);
+			const rowStart = vlines[target] ?? 0;
+			const targetLine = lineSpan(text, starts, lineOf(starts, Math.min(rowStart, text.length)));
+			const land = clampToLine(rowStart + column, targetLine);
+			return {
+				from: caret,
+				to: land,
+				land,
+				vertical: false,
+				want: "clear"
+			};
+		}
 		/** Invert a find kind (`,` repeats the last find in the opposite direction). */
 		function invertFind(kind) {
 			switch (kind) {
@@ -529,6 +570,11 @@ window.__ModuleLoader__.load({
 					if (state.pendingOperator !== null) return applyOperatorMotion(state, sim, caret, state.pendingOperator, motion);
 					return finishPlainMotion(state, sim, caret, motion, col, state.wantColumn);
 				}
+				if (ev.key === "j" || ev.key === "k") {
+					const motion = visualRowMotion(doc, caret, ev.key === "j" ? count : -count);
+					if (state.pendingOperator !== null) return applyOperatorMotion(state, sim, caret, state.pendingOperator, motion);
+					return finishPlainMotion(state, sim, caret, motion, col, state.wantColumn);
+				}
 				return stepNormal(clearPending(state), doc, ev);
 			}
 			const nextCount = countDigitOf(state, ev.key);
@@ -852,6 +898,7 @@ window.__ModuleLoader__.load({
 			}
 			if (state.pendingG) {
 				if (ev.key === "g") return finishVisualMotion(state, vis, sim, caret, resolveMotion(doc.text, caret, "gg", count, null), col);
+				if (ev.key === "j" || ev.key === "k") return finishVisualMotion(state, vis, sim, caret, visualRowMotion(doc, caret, ev.key === "j" ? count : -count), col);
 				return stepVisual(clearPending(state), vis, doc, ev);
 			}
 			if (ev.key === "Escape" || ev.key === "v" || ev.key === "V") {
@@ -1131,6 +1178,185 @@ window.__ModuleLoader__.load({
 			};
 		}
 		//#endregion
+		//#region src/client/vim/visualLines.ts
+		/**
+		* Display-row measurement for `gj`/`gk`: mirrors the focused composer editor
+		* into an offscreen element with the editor's typography and the same
+		* content-box width, then walks the detect-projection text (chip = one
+		* U+FFFC) char by char reading each glyph's client rect to detect the rows
+		* soft wrapping produced. Range client rects are engine-fragile (browsers
+		* return empty lists for various focus/visibility states), so a canvas
+		* word-wrap simulation answers whenever the rect walk could not measure —
+		* and null (the caller degrades to `j`/`k`) when neither strategy can.
+		* Pure DOM, no cordis/React; consulted lazily by the controller only while
+		* the vim machine waits on a `g` prefix.
+		*/
+		/** Vertical distance (px) below which two glyph tops read as the same row. */
+		const ROW_TOLERANCE = 2;
+		/** Typography properties that decide where the browser breaks lines. */
+		const TYPOGRAPHY_PROPS = [
+			"direction",
+			"font-family",
+			"font-kerning",
+			"font-size",
+			"font-stretch",
+			"font-style",
+			"font-variant",
+			"font-variant-ligatures",
+			"font-feature-settings",
+			"font-weight",
+			"letter-spacing",
+			"word-spacing",
+			"tab-size",
+			"text-align",
+			"text-indent",
+			"text-transform",
+			"text-rendering",
+			"text-wrap",
+			"white-space",
+			"white-space-collapse",
+			"word-break",
+			"overflow-wrap",
+			"line-break",
+			"hyphens",
+			"box-sizing",
+			"border-left-width",
+			"border-right-width",
+			"padding-left",
+			"padding-right"
+		];
+		/** The CSS font shorthand a canvas context accepts, built from computed styles. */
+		function canvasFont(styles) {
+			return [
+				styles.fontStyle,
+				styles.fontVariant,
+				styles.fontWeight,
+				styles.fontSize,
+				styles.fontFamily
+			].join(" ");
+		}
+		/**
+		* Measure the display-row start offsets of one document rendering.
+		* @param text - the detect-projection text (chip = one U+FFFC character).
+		* @returns sorted row-start offsets ([0] === 0), or null when no strategy
+		* could measure — callers degrade to logical `j`/`k`.
+		*/
+		function measureVisualLines(text) {
+			if (typeof document === "undefined" || text === "") return null;
+			const host = document.activeElement;
+			if (!(host instanceof HTMLElement)) return null;
+			const styles = getComputedStyle(host);
+			const clientWidth = host.clientWidth;
+			if (clientWidth <= 0) return null;
+			const contentBox = clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
+			if (!Number.isFinite(contentBox) || contentBox <= 0) return null;
+			const fromRects = rectRowStarts(text, styles, contentBox);
+			if (fromRects !== null) return fromRects;
+			const fromCanvas = canvasRowStarts(text, styles, contentBox);
+			return fromCanvas.length > 0 ? fromCanvas : null;
+		}
+		/**
+		* Primary strategy: a mirror element pinned offscreen (visible — visibility
+		* tricks are exactly what collapses Range rects) carrying the editor's
+		* typography, walked glyph by glyph.
+		* @returns row starts, or null when the engine answered no rects at all.
+		*/
+		function rectRowStarts(text, styles, contentBox) {
+			const mirror = document.createElement("div");
+			try {
+				for (const prop of TYPOGRAPHY_PROPS) {
+					const value = styles.getPropertyValue(prop);
+					if (value !== "") mirror.style.setProperty(prop, value);
+				}
+				Object.assign(mirror.style, {
+					position: "fixed",
+					left: "-10000px",
+					top: "0",
+					width: `${contentBox}px`,
+					height: "auto",
+					maxHeight: "none",
+					whiteSpace: "pre-wrap",
+					overflowWrap: "break-word"
+				});
+				mirror.textContent = text;
+				document.body.appendChild(mirror);
+				const node = mirror.firstChild;
+				if (node === null || node.nodeType !== Node.TEXT_NODE) return null;
+				const textNode = node;
+				const range = document.createRange();
+				let rowTop = null;
+				let measured = 0;
+				const starts = [0];
+				for (let i = 0; i < text.length; i += 1) {
+					range.setStart(textNode, i);
+					range.setEnd(textNode, i + 1);
+					const rect = range.getClientRects()[0];
+					if (rect === void 0) continue;
+					measured += 1;
+					const top = rect.top;
+					const forced = i > 0 && text[i - 1] === "\n";
+					if (rowTop === null) rowTop = top;
+					else if (forced || Math.abs(top - rowTop) > ROW_TOLERANCE) {
+						starts.push(i);
+						rowTop = top;
+					}
+				}
+				if (measured === 0) return null;
+				return starts;
+			} catch {
+				return null;
+			} finally {
+				mirror.remove();
+			}
+		}
+		/**
+		* Fallback strategy: greedy word-wrap simulation over canvas glyph widths —
+		* break after the last space that fit, or mid-word when none did. Less exact
+		* than the browser's own line breaking, but immune to Range rect quirks.
+		*/
+		function canvasRowStarts(text, styles, width) {
+			const ctx = document.createElement("canvas").getContext("2d");
+			if (ctx === null) return [];
+			ctx.font = canvasFont(styles);
+			const spaced = ctx;
+			if ("letterSpacing" in spaced) spaced.letterSpacing = styles.letterSpacing;
+			const widthOf = (i) => ctx.measureText(text[i] ?? "").width;
+			const starts = [0];
+			/** Record the offset a fresh row opens at (deduped, bounded to real glyphs). */
+			const openRow = (p) => {
+				if (p > 0 && p < text.length && starts[starts.length - 1] !== p) starts.push(p);
+			};
+			let rowStart = 0;
+			let x = 0;
+			let lastSpaceFit = -1;
+			for (let i = 0; i < text.length; i += 1) {
+				const ch = text[i] ?? "";
+				if (ch === "\n") {
+					rowStart = i + 1;
+					x = 0;
+					lastSpaceFit = -1;
+					openRow(rowStart);
+					continue;
+				}
+				const w = widthOf(i);
+				if (x > 0 && x + w > width) {
+					if (lastSpaceFit >= rowStart) rowStart = lastSpaceFit + 1;
+					else rowStart = i;
+					openRow(rowStart);
+					x = 0;
+					lastSpaceFit = -1;
+					for (let j = rowStart; j <= i; j += 1) {
+						x += widthOf(j);
+						if (text[j] === " ") lastSpaceFit = j;
+					}
+					continue;
+				}
+				x += w;
+				if (ch === " ") lastSpaceFit = i;
+			}
+			return starts;
+		}
+		//#endregion
 		//#region src/client/controller.ts
 		/**
 		* VimController: the plugin's single apply-closure instance. Owns the pure
@@ -1186,10 +1412,12 @@ window.__ModuleLoader__.load({
 				const text = face.text();
 				const selection = face.selection();
 				const caret = selection === null ? face.caret() ?? text.length : selection.end;
+				const vlines = this.machine.pendingG ? measureVisualLines(text) : null;
 				const result = step(this.machine, {
 					text,
 					caret,
-					selection
+					selection,
+					vlines
 				}, {
 					key: event.key,
 					ctrl: event.ctrlKey,
@@ -1225,6 +1453,8 @@ window.__ModuleLoader__.load({
 		const BARE_WIDTH_RATIO = .6;
 		/** Pixel fallback when the font size itself is unreadable. */
 		const BARE_WIDTH_FLOOR = 8;
+		/** Line height used when the surface reports `normal` and only the font size is measurable. */
+		const EMPTY_LINE_RATIO = 1.2;
 		/**
 		* The composer's editing surface of the card containing `root`.
 		* @param root - any element rendered inside the composer card.
@@ -1283,8 +1513,46 @@ window.__ModuleLoader__.load({
 				}
 			}
 			const box = range.getBoundingClientRect();
-			if (box.height <= 0 && box.width <= 0) return null;
-			return boxOf(box, width);
+			if (box.height > 0 || box.width > 0) return boxOf(box, width);
+			return emptyBox(editable, width);
+		}
+		/**
+		* The empty-draft fallback cell: the block caret anchored at the surface's
+		* first line when the collapsed selection has no character geometry of its
+		* own (an empty draft, or a caret on an unrendered node). Prefers the
+		* contents range's first client rect (the line box at the insertion point);
+		* falls back to the editable's own box inset by its padding, with the
+		* line-height (or font-size-derived) height.
+		* @param editable - the composer's editing surface.
+		* @param width - the bare caret width.
+		* @returns the fallback box, or null when even the surface is unmeasurable.
+		*/
+		function emptyBox(editable, width) {
+			const contents = editable.ownerDocument.createRange();
+			contents.selectNodeContents(editable);
+			const first = typeof contents.getClientRects === "function" ? contents.getClientRects()[0] : void 0;
+			if (first !== void 0 && first.height > 0) return {
+				left: first.left,
+				top: first.top,
+				width,
+				height: first.height
+			};
+			const box = editable.getBoundingClientRect();
+			if (box.height <= 0) return null;
+			const style = getComputedStyle(editable);
+			const pad = (value) => {
+				const parsed = parseFloat(value);
+				return Number.isFinite(parsed) ? parsed : 0;
+			};
+			const lineHeight = parseFloat(style.lineHeight);
+			const size = parseFloat(style.fontSize);
+			const height = Number.isFinite(lineHeight) ? lineHeight : Number.isFinite(size) ? size * EMPTY_LINE_RATIO : box.height;
+			return {
+				left: box.left + pad(style.paddingLeft),
+				top: box.top + pad(style.paddingTop),
+				width,
+				height
+			};
 		}
 		/**
 		* Measure the block caret for the selection inside the composer card that
@@ -1493,7 +1761,11 @@ window.__ModuleLoader__.load({
 			"toggle.disable": "停用 Vim 编辑",
 			"mode.normal": "NORMAL",
 			"mode.insert": "INSERT",
-			"mode.visual": "VISUAL"
+			"mode.visual": "VISUAL",
+			"command.description": "切换 Vim 编辑（当前：{state}）",
+			"command.state.enabled": "已启用",
+			"command.state.disabled": "已停用",
+			"command.attachmentsUnsupported": "附件不能伴随 /vim 命令提交"
 		};
 		/** English dictionary, checked complete against the zh key set. */
 		const en = {
@@ -1502,17 +1774,25 @@ window.__ModuleLoader__.load({
 			"toggle.disable": "Disable Vim editing",
 			"mode.normal": "NORMAL",
 			"mode.insert": "INSERT",
-			"mode.visual": "VISUAL"
+			"mode.visual": "VISUAL",
+			"command.description": "Toggle Vim editing (currently: {state})",
+			"command.state.enabled": "enabled",
+			"command.state.disabled": "disabled",
+			"command.attachmentsUnsupported": "Attachments cannot accompany the /vim command"
 		};
 		//#endregion
 		//#region src/client/index.ts
 		/** Namespace owning the toggle and badge copy. */
 		const VIM_NS = "vim.mode";
-		/** Required services: the slot tree, the locale seat, and the composer keyboard registry. */
+		/** The bare slash token the vim source owns. */
+		const VIM_TOKEN = "/vim";
+		/** Required services: the slot tree, the locale seat, the composer keyboard registry, and the slash-trigger pipeline. */
 		const inject = [
 			"slots",
 			"locale",
-			"composerKeys"
+			"composerKeys",
+			"inputTriggers",
+			"sessions"
 		];
 		/**
 		* Client plugin body: mount the controller, register the keydown
@@ -1525,6 +1805,33 @@ window.__ModuleLoader__.load({
 				zh,
 				en
 			}), "ui-vim-mode: dictionaries");
+			const t = ctx.locale.bind(VIM_NS);
+			const vimSource = {
+				trigger: "/",
+				name: "vim",
+				showGroupTitle: false,
+				candidates: async () => [{
+					name: "vim",
+					description: t("command.description", { state: controller.enabled.getSnapshot() ? t("command.state.enabled") : t("command.state.disabled") })
+				}],
+				onPick: (pick) => {
+					if (pick.candidate.name !== "vim") return void 0;
+					controller.toggle();
+					return { text: "" };
+				},
+				matchEnter: async (session, line, _signal, envelope) => {
+					if (line.trim() !== VIM_TOKEN) return void 0;
+					if (envelope.attachments > 0) throw new Error(t("command.attachmentsUnsupported"));
+					controller.toggle();
+					const actx = ctx.sessions.scope(session.sessionId);
+					actx?.bail(actx, "slash/input-consume-token", { guard: {
+						kind: "bare-token",
+						token: VIM_TOKEN
+					} });
+					return "handled";
+				}
+			};
+			ctx.effect(() => ctx.inputTriggers.registerSource(vimSource), "ui-vim-mode: /vim source");
 			ctx.effect(() => ctx.composerKeys.register({ keydown: (face, event) => controller.keydown(face, event) }), "ui-vim-mode: composer keydown interceptor");
 			ctx.slots.inject("conversation.input.left", () => ctx.slots.register({
 				name: "conversation.input.left",

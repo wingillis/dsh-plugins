@@ -4,7 +4,7 @@
  * repo builds without the harness monorepo.
  *
  * Two artifacts:
- * - the Node half (lib/index.js, lib/invariant.js) the dsh Loader imports;
+ * - the Node half (lib/index.js) the dsh Loader imports;
  * - the browser bundle (lib/client.js), a closure factory registered through
  *   window.__ModuleLoader__.load() whose externals resolve against the frozen
  *   module table the dsh web shell seeds. CSS Modules compile to hashed class
@@ -66,10 +66,10 @@ function sourceAssetPath(source: string, importer: string): string {
   return resolvePath(dirname(importer), source)
 }
 
-/** Node half: the host plugin body and the invariant companion. */
+/** Node half: the host plugin body. */
 const nodeConfig: UserConfig = {
   name: PACKAGE_ID,
-  entry: ['src/index.ts', 'src/invariant.ts'],
+  entry: ['src/index.ts'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

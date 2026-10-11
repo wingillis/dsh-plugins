@@ -23,9 +23,12 @@
     "types": ["vitest/globals", "node"],
     "paths": {
       "@deepseek-ai/cordis": ["../../../deepseek-harness/vendor/cordis/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-invariants": ["../../../deepseek-harness/packages/runtime-diagnostics/invariants/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-locale": ["../../../deepseek-harness/packages/client/locale/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-locale/client": ["../../../deepseek-harness/packages/client/locale/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-session-controller": ["../../../deepseek-harness/packages/api/session-controller/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-api-session-controller/client": ["../../../deepseek-harness/packages/api/session-controller/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-input-trigger": ["../../../deepseek-harness/packages/client/ui-input-trigger/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-input-trigger/client": ["../../../deepseek-harness/packages/client/ui-input-trigger/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-store": ["../../../deepseek-harness/packages/client/store/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-test-runtime": ["../../../deepseek-harness/packages/test-support/client-runtime/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-conversation": ["../../../deepseek-harness/packages/client/ui-conversation/lib/types/index.d.ts"],

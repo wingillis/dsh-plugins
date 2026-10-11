@@ -3,3 +3,4 @@ node_modules/
 *.tsbuildinfo
 *.tgz
 .DS_Store
+.pnpm-store/
